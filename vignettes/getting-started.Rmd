@@ -1,0 +1,289 @@
+---
+title: "Getting started with readPBOC"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Getting started with readPBOC}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  prompt = FALSE,
+  fig.width = 7,
+  fig.height = 4.5,
+  out.width = "100%"
+)
+source_roots <- c(".", "..")
+source_roots <- source_roots[
+  file.exists(file.path(source_roots, "DESCRIPTION"))
+]
+if (length(source_roots) && requireNamespace("pkgload", quietly = TRUE)) {
+  pkgload::load_all(
+    source_roots[[1L]],
+    quiet = TRUE,
+    export_all = FALSE
+  )
+} else {
+  library(readPBOC)
+}
+
+live_examples <- identical(
+  Sys.getenv("READPBOC_LIVE_EXAMPLES"),
+  "true"
+)
+
+package_file <- function(...) {
+  pieces <- c(...)
+  relative <- do.call(file.path, as.list(pieces))
+  candidates <- c(
+    file.path(source_roots, "inst", relative),
+    system.file(..., package = "readPBOC")
+  )
+  found <- candidates[
+    nzchar(candidates) & file.exists(candidates) & !dir.exists(candidates)
+  ]
+  if (!length(found)) {
+    stop(
+      "Could not find the packaged example file ",
+      paste(pieces, collapse = "/"),
+      ". Build or install readPBOC before rendering this vignette."
+    )
+  }
+  normalizePath(found[[1L]], winslash = "/", mustWork = TRUE)
+}
+
+money_cells <- utils::read.csv(
+  package_file("extdata", "readpboc-worksheet-fixture.csv"),
+  header = FALSE,
+  check.names = FALSE,
+  na.strings = "",
+  stringsAsFactors = FALSE,
+  fileEncoding = "UTF-8"
+)
+
+money_snapshot_file <- package_file(
+  "examples", "data", "pboc-current-series-values.rds"
+)
+```
+
+## A complete path from source to analysis
+
+`readPBOC` follows a PBOC data workflow from discovery to an auditable local
+file. The package has four layers:
+
+1. `pboc_years()`,
+   `pboc_sections()`,
+   and `pboc_catalog()`
+   discover the Chinese and English archives.
+2. `pboc_read()`
+   reads a local or remote spreadsheet/HTML table, while
+   `pboc_tidy()`
+   turns irregular worksheet cells into long observations.
+3. `pboc_releases()`
+   and `pboc_read_release()`
+   index and read statistical statements.
+4. `pboc_download()`,
+   `pboc_snapshot()`,
+   and `pboc_revisions()`
+   preserve source files and make catalog changes explicit.
+
+PBOC pages and attachments are public, so these workflows require no account
+or API key. The examples combine a small author-created parser fixture with a
+provenance-recorded PBOC snapshot, allowing the complete article to render
+offline while retaining a clear path to the live source.
+
+## Installation
+
+The development version can be installed from GitHub:
+
+```{r install, eval=FALSE}
+install.packages("pak")
+pak::pak("chartwell-macro/readPBoC")
+```
+
+After a release is accepted by CRAN, the stable installation route will be:
+
+```{r cran-install, eval=FALSE}
+install.packages("readPBOC")
+```
+
+Until then, GitHub is the current installation source.
+
+## Know what the example covers
+
+The live Chinese and English archives are independent inventories, not paired
+translations. A listed year does not guarantee that the same table, period,
+format, or publication date exists in both languages. The packaged numeric
+snapshot used below is Chinese-source data with bilingual labels: it contains
+26 current-year workbooks and 3,095 observations, mostly from January through
+June 2026. Financial-market tables currently end in May, one overseas-assets
+table ends in March, and the reserves/liquidity template is a 30 June
+point-in-time table.
+
+Missing rows are not zeros. The packaged snapshot includes sparse pledged-repo
+trading-volume series, while its Money and Money & Quasi-money series each
+contain all six months from January through June. See
+[Discovering and reading data](discovering-and-reading-data.html#understand-coverage-before-reading)
+for the complete packaged-coverage summary, language differences, and a gap
+check that can be reused for other series.
+
+## Retrieve and chart a time series
+
+The explicit online path is discovery, selection, and reading. The following
+opt-in chunk narrows the 2026 Chinese catalog to the Money Supply workbook,
+requires one unambiguous match, and passes that row to `pboc_read()` with
+normalisation enabled:
+
+```{r retrieve-money-supply-live, eval=live_examples}
+money_catalog <- pboc_catalog(
+  2026,
+  language = "zh",
+  section = "money_and_banking",
+  formats = "xlsx"
+)
+money_asset <- money_catalog[
+  grepl("Money Supply|货币供应量", money_catalog$item),
+  ,
+  drop = FALSE
+]
+stopifnot(nrow(money_asset) == 1L)
+money_supply <- pboc_read(
+  money_asset[1L, , drop = FALSE],
+  sheet = 1,
+  tidy = TRUE
+)
+```
+
+Set `READPBOC_LIVE_EXAMPLES=true` to run that live path deliberately. The
+default vignette build uses the installed normalised snapshot for the same
+attachment revision (`2026071516481518348`), published on 15 July 2026. This
+keeps documentation and CRAN builds deterministic while preserving the
+official URL, raw values, units, and worksheet coordinates.
+
+```{r load-money-supply-snapshot, include=FALSE}
+if (!exists("money_supply", inherits = FALSE)) {
+  money_values <- readRDS(money_snapshot_file)
+  money_supply <- money_values[
+    money_values$revision_id == "2026071516481518348",
+    ,
+    drop = FALSE
+  ]
+}
+```
+
+The source unit is RMB 100 million, so divide `value` by 10,000 to express the
+levels in RMB trillion. No additional reshaping package is needed:
+
+```{r prepare-money-supply-chart}
+chart_data <- money_supply[
+  money_supply$series %in% c("Money", "Money & Quasi-money") &
+    !is.na(money_supply$value),
+  c("series", "period", "value"),
+  drop = FALSE
+]
+chart_data$date <- as.Date(
+  paste0(sub("\\.", "-", chart_data$period), "-01")
+)
+chart_data$value <- chart_data$value / 10000
+chart_data <- chart_data[order(chart_data$series, chart_data$date), ]
+head(chart_data)
+```
+
+```{r validate-money-supply-chart, include=FALSE}
+stopifnot(
+  nrow(chart_data) > 0L,
+  !anyNA(chart_data[c("series", "date", "value")])
+)
+if (!live_examples) {
+  stopifnot(nrow(chart_data) == 12L)
+}
+```
+
+```{r money-supply-chart, fig.alt="Line chart of PBOC M1 and M2 money-supply levels from January to June 2026, in RMB trillion."}
+if (requireNamespace("ggplot2", quietly = TRUE)) {
+  ggplot2::ggplot(
+    chart_data,
+    ggplot2::aes(x = date, y = value, colour = series, group = series)
+  ) +
+    ggplot2::geom_line() +
+    ggplot2::labs(
+      title = "PBOC money supply",
+      subtitle = "Monthly published observations",
+      x = "Month",
+      y = "RMB trillion",
+      colour = "Series",
+      caption = "Source: People's Bank of China website"
+    ) +
+    ggplot2::theme_minimal(base_size = 13)
+}
+```
+
+Required source attribution: 稿件来源：中国人民银行网站 (Source: People's Bank
+of China website).
+
+The chart uses the public output columns returned by both paths: `series`,
+canonical monthly `period`, and numeric `value`. The README homepage shows the
+shorter one-call `pboc_data()` equivalent.
+
+## Read and normalise a local worksheet
+
+The packaged structural fixture is a small, author-created worksheet-shaped
+CSV. It is read as character cells and passed to `pboc_tidy()`, which detects
+dated headers, keeps bilingual labels where present, and retains source
+coordinates. Its synthetic values provide a compact parser demonstration.
+
+```{r first-success}
+money <- pboc_tidy(money_cells)
+stopifnot(is.data.frame(money), all(c("period", "value") %in% names(money)))
+
+names(money)
+head(money[c("series", "period", "value", "value_raw")])
+```
+
+The result is a tibble with a stable audit-oriented shape. The main columns are
+`table`, `series`, `series_zh`, `series_en`, `period`, `value`, `value_raw`,
+`unit`, `source_row`, and `source_column`. `value` is numeric when it can be
+parsed; `value_raw` retains the source text. Periods are normalised to labels
+such as `2025.01`, while source row and column numbers point back to the
+original worksheet. Any notes detected below the table are stored in the
+`"notes"` attribute.
+
+```{r inspect-contract}
+class(money)
+attributes(money)[intersect(
+  c("notes", "source_url", "source_path"),
+  names(attributes(money))
+)]
+```
+
+This is the useful boundary for downstream code: select a series, filter a
+period, and use `value` for calculations while keeping `value_raw` and source
+coordinates for review. Persistent storage remains an explicit caller choice.
+
+## Continue with live data and provenance
+
+* To locate a current workbook, start with
+  `pboc_catalog()`
+  and then pass one catalog row to `pboc_read()` or `pboc_data()`.
+* To read an already downloaded workbook or HTML table, use
+  `pboc_read()`.
+* To preserve a release and compare future catalogs, see
+  `pboc_download()`
+  and
+  `pboc_revisions()`.
+* For request limits, storage behaviour, and recovery guidance, read the
+  [Network, authentication, and troubleshooting](network-authentication-troubleshooting.html)
+  article.
+
+## Scope and limitations
+
+`readPBOC` normalises XLS/XLSX workbooks and exposes HTML tables. It catalogs
+and preserves PDFs for use with a dedicated PDF tool. Live discovery depends
+on the official site's availability and markup, while packaged snapshots are
+frozen evidence rather than a current-data service. Retain source URLs,
+revision identifiers, and manifests when a result must be reproduced.

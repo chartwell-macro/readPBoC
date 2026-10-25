@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use readPBOC, please cite it using the metadata below."
+title: "readPBOC: Read People's Bank of China Data and Statistical Releases"
+type: software
+authors:
+  - given-names: Chartwell
+    family-names: Macro
+version: 0.1.3
+repository-code: "https://github.com/chartwell-macro/readPBoC"
+url: "https://github.com/chartwell-macro/readPBoC"
+license: MIT
+abstract: >-
+  Discover, download, read, normalise, preserve, and compare statistical data
+  and releases published by the People's Bank of China.

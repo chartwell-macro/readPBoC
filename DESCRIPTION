@@ -1,0 +1,42 @@
+Package: readPBOC
+Title: Read People's Bank of China Data and Statistical Releases
+Version: 0.1.3
+Authors@R:
+    person(given = "Chartwell", family = "Macro",
+           email = "chartwellmacro@gmail.com",
+           role = c("aut", "cre", "cph"))
+Description: Provides tools to discover, download, read, and normalise
+    statistical data published by the People's Bank of China (PBOC). It
+    supports the Chinese and English websites, XLS/XLSX spreadsheets, HTML
+    tables, statistical release pages and attachments, and revision-aware
+    catalogs, manifests, snapshots, and comparisons. PDF attachments can be
+    preserved for offline use but are not parsed. Public resources are accessed
+    from the official PBOC website (<https://www.pbc.gov.cn/>) on request;
+    local reading and comparison workflows can run offline.
+License: MIT + file LICENSE
+Depends:
+    R (>= 4.1.0)
+Imports:
+    curl,
+    readxl,
+    rvest,
+    tibble,
+    xml2
+Suggests:
+    dplyr,
+    DT,
+    ggplot2,
+    knitr,
+    pkgload,
+    rmarkdown,
+    scales,
+    testthat (>= 3.1.7)
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+Encoding: UTF-8
+Language: en-GB
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+URL: https://github.com/chartwell-macro/readPBoC,
+    https://chartwell-macro.github.io/readPBoC/
+BugReports: mailto:chartwellmacro@gmail.com

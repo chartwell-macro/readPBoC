@@ -1,0 +1,41 @@
+if (!exists("meta", inherits = FALSE) || is.null(meta) || is.null(names(meta)) ||
+    !all(c("Title", "Version", "URL") %in% names(meta))) {
+  description_path <- "DESCRIPTION"
+  if (file.exists(description_path)) {
+    meta <- base::read.dcf(description_path)[1L, ]
+  } else {
+    meta <- suppressWarnings(utils::packageDescription("readPBOC"))
+  }
+}
+
+metadata_field <- function(name, fallback) {
+  if (!is.null(meta) && !is.null(names(meta)) && name %in% names(meta)) {
+    value <- meta[[name]]
+    if (length(value) == 1L && !is.na(value) && nzchar(value)) return(value)
+  }
+  fallback
+}
+
+package_title <- paste0("readPBOC: ", metadata_field(
+  "Title",
+  "Read People's Bank of China Data and Statistical Releases"
+))
+package_version <- metadata_field("Version", "development version")
+package_url <- trimws(strsplit(
+  metadata_field("URL", "https://github.com/chartwell-macro/readPBoC"),
+  ",",
+  fixed = TRUE
+)[[1L]][1L])
+package_year <- "2026"
+
+bibentry(
+  bibtype = "Manual",
+  title = package_title,
+  author = person(
+    family = "Chartwell Macro",
+    role = c("aut", "cre")
+  ),
+  year = package_year,
+  note = sprintf("R package version %s", package_version),
+  url = package_url
+)

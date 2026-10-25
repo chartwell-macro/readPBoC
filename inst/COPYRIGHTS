@@ -1,0 +1,53 @@
+Copyright and provenance notice
+================================
+
+Original package code and documentation
+----------------------------------------
+
+The original readPBOC package code and documentation are copyright Chartwell Macro and
+are offered under the MIT License in the top-level LICENSE file.
+The MIT License applies to those original package materials; it does not
+transfer or grant rights in source material owned by third parties.
+
+People's Bank of China source material
+--------------------------------------
+
+The package repository includes snapshots and generated examples derived from
+material published by the People's Bank of China (PBOC), including normalized
+catalog/value/release snapshots and rendered dashboard files. These files
+remain PBOC source material and are not asserted to be public domain. Their
+source URLs and publication or retrieval dates are retained in the associated
+data and metadata where applicable.
+
+PBOC's legal notice is available at:
+<https://www.pbc.gov.cn/rmyh/109345/index.html>
+
+The maintainer confirms, as of 2026-08-24, that permission has been obtained
+to redistribute the bundled PBOC-derived material with readPBOC, including
+perpetual distribution through CRAN and its mirrors. The permission covers
+the normalized catalog, value, release-index, and audit snapshots under
+`inst/examples/data` in RDS and CSV form, and the PBOC-derived output in
+`pboc-current-series-dashboard.html` and
+`pboc-release-coverage-dashboard.html`. Documentation figures and rendered
+article/site copies derived solely from those covered snapshots, including the
+Money Supply figure under `man/figures`, are covered on the same terms. The
+permission does not cover unrelated PBOC material that a user may download
+separately.
+
+PBOC retains copyright in the covered source material; the permission does
+not place it in the public domain or relicense it under the package's MIT
+License. Preserve the provenance metadata and the attribution
+"稿件来源：中国人民银行网站" (Source: People's Bank of China website) when
+redistributing the snapshots or generated artifacts. The package is not an
+official PBOC product.
+
+Third-party components in generated HTML
+-----------------------------------------
+
+Some generated HTML examples preserve embedded notices for third-party
+components. Known components include jQuery 3.6.0 (MIT, OpenJS Foundation),
+Bootstrap 3.3.5 (MIT), Respond.js 1.4.2 (MIT), jQuery UI 1.13.2 (MIT),
+jquery.tocify.js 1.9.1 (MIT), and highlight.js 9.12.0 (BSD 3-Clause). Their
+respective notices and licenses apply to those components; they are not
+relicensed by readPBOC. The embedded notices should be retained when those
+generated files are copied or redistributed.

@@ -1,0 +1,340 @@
+---
+title: "Discovering and reading PBOC data"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Discovering and reading PBOC data}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  prompt = FALSE
+)
+source_roots <- c(".", "..")
+source_roots <- source_roots[
+  file.exists(file.path(source_roots, "DESCRIPTION"))
+]
+if (length(source_roots) && requireNamespace("pkgload", quietly = TRUE)) {
+  pkgload::load_all(
+    source_roots[[1L]],
+    quiet = TRUE,
+    export_all = FALSE
+  )
+} else {
+  library(readPBOC)
+}
+
+package_file <- function(...) {
+  pieces <- c(...)
+  relative <- do.call(file.path, as.list(pieces))
+  candidates <- c(
+    file.path(source_roots, "inst", relative),
+    system.file(..., package = "readPBOC")
+  )
+  found <- candidates[
+    nzchar(candidates) & file.exists(candidates) & !dir.exists(candidates)
+  ]
+  if (!length(found)) {
+    stop("Could not find packaged file ", paste(pieces, collapse = "/"))
+  }
+  normalizePath(found[[1L]], winslash = "/", mustWork = TRUE)
+}
+
+money_cells <- utils::read.csv(
+  package_file("extdata", "readpboc-worksheet-fixture.csv"),
+  header = FALSE,
+  check.names = FALSE,
+  na.strings = "",
+  stringsAsFactors = FALSE,
+  fileEncoding = "UTF-8"
+)
+html_fixture <- package_file("extdata", "readpboc-table-fixture.html")
+catalog_snapshot <- readRDS(package_file(
+  "examples", "data", "pboc-current-series-catalog.rds"
+))
+values_snapshot <- readRDS(package_file(
+  "examples", "data", "pboc-current-series-values.rds"
+))
+release_snapshot <- readRDS(package_file(
+  "examples", "data", "pboc-release-index.rds"
+))
+```
+
+`readPBOC` separates discovery from reading. Discovery follows the official
+archive and returns metadata; reading consumes a catalog row, URL, or local
+path. This separation is useful when you want to inspect coverage before
+downloading anything, or when an audit requires the exact source URL beside
+the observations.
+
+## Understand coverage before reading
+
+There is no single package-wide series start date. Discovery reflects the
+current PBOC indexes, and a year row only says that the parser recognised a
+year-labelled link. Chinese and English pages are separate inventories rather
+than paired translations. At the live check used for this documentation on 25
+August 2026, recognised Chinese year rows ran from 1999 through 2026 and
+English year-labelled rows from 2001 through 2026. The 2026 section check
+returned six Chinese sections and no English section rows, illustrating why a
+year link alone is not evidence that a particular English workbook is
+available.
+
+The installed offline snapshots record a fixed, auditable subset:
+
+```{r packaged-coverage}
+series_key <- paste(
+  values_snapshot$revision_id,
+  values_snapshot$sheet,
+  values_snapshot$table,
+  values_snapshot$series,
+  sep = " / "
+)
+
+coverage_summary <- data.frame(
+  evidence = c("Numeric workbooks", "Numeric observations", "Table/series combinations", "Distinct series labels", "Release-index rows"),
+  count = c(
+    nrow(catalog_snapshot),
+    nrow(values_snapshot),
+    length(unique(series_key)),
+    length(unique(values_snapshot$series)),
+    nrow(release_snapshot)
+  )
+)
+knitr::kable(coverage_summary, row.names = FALSE)
+```
+
+The 26 numeric workbooks are all sourced from the Chinese 2026 archive. Their
+coverage by subject is:
+
+```{r packaged-subjects}
+subject_counts <- sort(table(catalog_snapshot$section_id), decreasing = TRUE)
+knitr::kable(
+  data.frame(
+    section_id = names(subject_counts),
+    workbooks = as.integer(subject_counts)
+  ),
+  row.names = FALSE
+)
+```
+
+These groups cover aggregate-financing flow and stock; CGPI; credit-fund
+sources and uses for several institution/currency groupings; Shibor, bond
+yields, interbank lending and repos, debt securities, and stock markets; and
+money supply, exchange rates, reserves, overseas-held RMB assets, and monetary
+and depository-sector balance sheets.
+
+The workbook titles below are the complete numeric snapshot inventory. The
+count is the number of distinct `series` labels in each workbook, not a promise
+that every label has the same periods.
+
+```{r packaged-workbooks}
+workbook_inventory <- aggregate(
+  series ~ section_id + release_title_en,
+  values_snapshot,
+  function(x) length(unique(x))
+)
+names(workbook_inventory)[3] <- "series_labels"
+workbook_inventory <- workbook_inventory[
+  order(workbook_inventory$section_id, workbook_inventory$release_title_en),
+]
+knitr::kable(workbook_inventory, row.names = FALSE)
+```
+
+For the exact label-level inventory, keep the revision and workbook title with
+the label because names can recur across workbooks:
+
+```{r exact-series-inventory}
+series_inventory <- unique(values_snapshot[c(
+  "revision_id", "section_id", "release_title_en", "series"
+)])
+series_inventory <- series_inventory[order(
+  series_inventory$section_id,
+  series_inventory$release_title_en,
+  series_inventory$series
+), ]
+
+# Show the first entries; print series_inventory for the complete inventory.
+utils::head(series_inventory, 12)
+```
+
+Most monthly tables contain January–June 2026. Financial-market workbooks end
+in May, Domestic RMB Financial Assets Held by Overseas Entities ends in March,
+and the reserves/liquidity template contains one 30 June point-in-time column.
+Every stored row has a non-missing `period` and numeric `value`, but the panel
+is not balanced. In Statistics of Interbank Pledged Repo, six-month trading
+volume has no April row; nine-month and one-year trading volume have no January
+or May row. An absent observation is missing or unreported, never an implied
+zero.
+
+Gap checks should be scoped to one revision and series because labels can
+repeat across workbooks. This deterministic check confirms that the two Money
+Supply series used in Getting Started each contain all six expected months:
+
+```{r check-monthly-gaps}
+money <- values_snapshot[
+  values_snapshot$revision_id == "2026071516481518348" &
+    values_snapshot$series %in% c("Money", "Money & Quasi-money"),
+  c("series", "period", "value"),
+  drop = FALSE
+]
+
+monthly_coverage <- function(period) {
+  dates <- sort(unique(as.Date(
+    paste0(sub("\\.", "-", period), "-01")
+  )))
+  expected <- seq.Date(min(dates), max(dates), by = "month")
+  missing <- setdiff(expected, dates)
+  data.frame(
+    first = min(dates),
+    last = max(dates),
+    observations = length(dates),
+    missing_months = if (length(missing)) {
+      paste(format(missing, "%Y-%m"), collapse = ", ")
+    } else {
+      "none"
+    }
+  )
+}
+
+money_coverage <- do.call(
+  rbind,
+  lapply(split(money$period, money$series), monthly_coverage)
+)
+knitr::kable(money_coverage)
+```
+
+Language is source provenance, not label language. All 3,095 numeric rows have
+`language == "zh"` and a non-missing `series_en`; 2,605 also have
+`series_zh`, while 490 carry an English-only series label. The release snapshot
+is different: it contains 740 Chinese index rows dated 17 April 2001–15 July
+2026 and 692 English rows dated 11 July 2002–15 July 2026. Those rows use
+different feed categories and are not guaranteed translations of each other.
+
+## Discover the archive (online)
+
+The discovery functions read the official PBOC indexes over HTTPS. They return
+tibbles and do not write a cache. The Chinese and English indexes are queried
+independently: the Chinese archive is commonly more current, while the English
+archive can have narrower coverage and different section titles.
+
+The following is a small live workflow for an interactive session. The guard
+means it is not run by CRAN or by an offline vignette build.
+
+```{r live-discovery, eval=TRUE}
+if (interactive()) {
+  years <- pboc_years("both")
+  sections <- pboc_sections(2026, "both")
+  catalog <- pboc_catalog(
+    2026,
+    language = "both",
+    section = "money",
+    formats = c("xlsx", "xls")
+  )
+
+  list(
+    years = head(years),
+    sections = head(sections),
+    catalog = head(catalog)
+  )
+}
+```
+
+`pboc_years()` returns `year` and `language`. `pboc_sections()` adds a
+canonical `section_id`, bilingual section labels, and the source URL.
+`pboc_catalog()` returns a `pboc_resource_index` tibble with stable
+`asset_id`, a publication-specific `revision_id`, year/language/section/item
+metadata, format, publication date, attachment URL, and source index URL.
+`asset_id` identifies the conceptual attachment across revisions; use
+`revision_id` when preserving an exact publication.
+
+## Read the same kind of data offline
+
+The reading layer can execute without the network. The small worksheet and
+HTML document are author-created structural fixtures under the package
+license; they contain no PBOC product data and are included only to exercise
+the readers offline.
+
+First normalise the worksheet cells directly:
+
+```{r tidy-fixture}
+money <- pboc_tidy(money_cells)
+stopifnot(all(c("series", "period", "value", "value_raw") %in% names(money)))
+
+money[c("series", "series_zh", "series_en", "period", "value")]
+```
+
+For a local HTML table, `pboc_read()`
+uses `rvest::html_table()`. One table is returned as a data frame/tibble; if
+the page contains multiple tables, a list of tables is returned. The packaged
+structural HTML fixture is read from its local path and is not downloaded
+again:
+
+```{r html-fixture}
+html_table <- pboc_read(html_fixture)
+stopifnot(is.data.frame(html_table) || is.list(html_table))
+
+html_info <- list(
+  class = class(html_table),
+  dimensions = if (is.data.frame(html_table)) dim(html_table) else lengths(html_table),
+  source_path = basename(attr(html_table, "source_path")),
+  source_url = attr(html_table, "source_url")
+)
+html_info
+```
+
+For a local spreadsheet, `sheet = 1` reads the first sheet and `sheet = NA`
+reads every non-empty sheet into a named list. `tidy = TRUE` asks
+`pboc_read()` to read spreadsheet cells as text and pass them through
+`pboc_tidy()`. HTML tables are parsed as supplied by the source markup; they
+are not passed through the spreadsheet normaliser.
+
+## Select one table with `pboc_data()`
+
+`pboc_data()`
+combines catalog filtering and reading for one matching workbook. Its
+`language = "auto"` mode tries the Chinese archive first and falls back to the
+English archive when that attempt errors or returns no matching row. It still
+requires a sufficiently specific `section` and, when necessary, `item`; an
+ambiguous or empty match is an error rather than an arbitrary selection.
+
+Use it interactively when you want the current official data:
+
+```{r live-data, eval=TRUE}
+if (interactive()) {
+  money_supply <- pboc_data(
+    year = 2026,
+    section = "money",
+    item = "Money Supply",
+    language = "auto",
+    tidy = TRUE
+  )
+  head(money_supply)
+}
+```
+
+The returned object follows the `pboc_read()`
+contract: a tibble for one sheet, or a named list when all sheets are read.
+For a tidied workbook, expect the long-form columns described in the
+`pboc_tidy()`
+reference, including `period`, numeric `value`, `value_raw`, and source
+coordinates. Source metadata are carried as attributes where available.
+
+## Choose the right preservation layer
+
+* Use `pboc_read()` for analysis when the source is a spreadsheet or HTML
+  table.
+* Use `pboc_tidy()` when the worksheet has bilingual, multi-row headers or
+  period columns and you need a stable long form with audit coordinates.
+* Use `pboc_download()`
+  when an attachment must be retained exactly, including a PDF. PDF extraction
+  is intentionally not normalised by `readPBOC`; downloading preserves the
+  official artifact for a separate PDF workflow.
+
+Because the PBOC pages are public but not an API contract, HTML structure and
+workbook layout can change. Keep the catalog row and source URL with derived
+data, and treat parser warnings or schema changes as review points rather than
+silently coercing them.

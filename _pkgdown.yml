@@ -1,0 +1,95 @@
+url: https://chartwell-macro.github.io/readPBoC/
+
+template:
+  bootstrap: 5
+
+repo:
+  url:
+    home: https://github.com/chartwell-macro/readPBoC
+    source: https://github.com/chartwell-macro/readPBoC/blob/main/
+    issue: mailto:chartwellmacro@gmail.com
+    user: https://github.com
+  branch: main
+
+home:
+  links:
+    - text: Chinese PBOC statistics archive
+      href: https://www.pbc.gov.cn/diaochatongjisi/116219/116319/index.html
+    - text: English PBOC statistics archive
+      href: https://www.pbc.gov.cn/en/3688247/3688975/index.html
+
+navbar:
+  structure:
+    left: [reference, articles, news]
+    right: [github]
+  components:
+    reference:
+      text: Reference
+      href: reference/index.html
+    articles:
+      text: Guides
+      menu:
+        - text: Getting started
+          href: articles/getting-started.html
+        - text: Discovering and reading data
+          href: articles/discovering-and-reading-data.html
+        - text: Releases and revisions
+          href: articles/releases-and-revisions.html
+        - text: Network, authentication, and troubleshooting
+          href: articles/network-authentication-troubleshooting.html
+    news:
+      text: Changelog
+      href: news/index.html
+
+articles:
+  - title: Start here
+    desc: Retrieve, normalise, and chart a PBOC time series with deterministic examples.
+    contents:
+      - getting-started
+  - title: Discover and read data
+    desc: Find official archive resources and turn selected files into tables.
+    contents:
+      - discovering-and-reading-data
+  - title: Releases and provenance
+    desc: Work with statistical releases and track attachment revisions.
+    contents:
+      - releases-and-revisions
+  - title: Network and troubleshooting
+    desc: Understand live requests, credentials, caching, and failure recovery.
+    contents:
+      - network-authentication-troubleshooting
+
+reference:
+  - title: Overview
+    contents:
+      - readPBOC-package
+  - title: Discovery
+    desc: Locate years, sections, and revision-aware attachment metadata.
+    contents:
+      - pboc_years
+      - pboc_sections
+      - pboc_catalog
+  - title: Read and tidy
+    desc: Read local or remote resources and normalise worksheet-shaped data.
+    contents:
+      - pboc_read
+      - pboc_data
+      - pboc_tidy
+  - title: Releases
+    desc: Index and read official statistical releases and statements.
+    contents:
+      - pboc_releases
+      - pboc_read_release
+  - title: Provenance and downloads
+    desc: Preserve source files and compare catalog snapshots over time.
+    contents:
+      - pboc_download
+      - pboc_snapshot
+      - pboc_revisions
+  - title: Display methods
+    desc: Console summaries for resource indexes and release objects.
+    contents:
+      - print.pboc_resource_index
+      - print.pboc_resource
+      - print.pboc_release_index
+      - print.pboc_release

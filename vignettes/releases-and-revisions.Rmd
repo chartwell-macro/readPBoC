@@ -1,0 +1,204 @@
+---
+title: "Releases, snapshots, and revisions"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Releases, snapshots, and revisions}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  prompt = FALSE
+)
+library(readPBOC)
+
+release_snapshot <- data.frame(
+  release_id = c("fixture-release-1", "fixture-release-2", "fixture-release-3"),
+  language = c("en", "en", "zh"),
+  category = c("fixture", "fixture", "fixture"),
+  title = c(
+    "Synthetic release fixture A",
+    "Synthetic release fixture B",
+    "Synthetic release fixture C"
+  ),
+  published_at = as.Date(c("2026-01-15", "2026-02-15", "2026-02-20")),
+  url = paste0("https://example.invalid/readPBOC/release-", 1:3, ".html"),
+  source_url = "https://example.invalid/readPBOC/releases.html",
+  stringsAsFactors = FALSE
+)
+class(release_snapshot) <- c("pboc_release_index", class(release_snapshot))
+
+resource_snapshot <- data.frame(
+  asset_id = c("fixture/asset-a", "fixture/asset-b", "fixture/asset-c"),
+  revision_id = c("fixture-r1", "fixture-r1", "fixture-r1"),
+  year = c(2026L, 2026L, 2026L),
+  language = c("en", "en", "zh"),
+  section_id = c("fixture", "fixture", "fixture"),
+  section = "Synthetic fixture section",
+  item = c("Synthetic table A", "Synthetic table B", "Synthetic table C"),
+  item_zh = NA_character_,
+  item_en = c("Synthetic table A", "Synthetic table B", "Synthetic table C"),
+  period = NA_character_,
+  format = "xlsx",
+  published_at = as.Date(c("2026-01-15", "2026-02-15", "2026-02-20")),
+  url = paste0("https://example.invalid/readPBOC/asset-", 1:3, ".xlsx"),
+  source_url = "https://example.invalid/readPBOC/catalog.html",
+  stringsAsFactors = FALSE
+)
+class(resource_snapshot) <- c("pboc_resource_index", class(resource_snapshot))
+```
+
+PBOC publishes both data attachments and statistical statements. A reproducible
+workflow treats the release index and the attachment catalog as separate
+inventories: releases describe statements and publication dates, while catalog
+rows identify files and revisions. The offline records in this article are
+author-created structural fixtures under the package license. They contain no
+PBOC product data and only demonstrate the shape and control flow; the guarded
+live examples are the route for current official records.
+
+## Work with a release index
+
+The offline fixture is a small `pboc_release_index` data frame with `release_id`,
+`language`, `category`, `title`, `published_at`, `url`, and `source_url`.
+
+```{r release-snapshot}
+stopifnot(inherits(release_snapshot, "pboc_release_index"))
+
+english <- release_snapshot[release_snapshot$language == "en", , drop = FALSE]
+english <- english[order(english$published_at, decreasing = TRUE), , drop = FALSE]
+english[c("release_id", "category", "title", "published_at")][seq_len(min(5L, nrow(english))), ]
+```
+
+For a current index, use
+`pboc_releases()`
+with a narrow category and page first. The live call is guarded so this
+vignette remains deterministic on CRAN and offline machines:
+
+```{r live-releases, eval=TRUE}
+if (interactive()) {
+  releases <- pboc_releases(
+    language = "en",
+    category = "financial_statistics",
+    pages = 1L
+  )
+  head(releases)
+}
+```
+
+`language = "both"` combines independent Chinese and English indexes; it does
+not imply that every statement exists in both languages. `pages = "all"`
+traverses the page count reported by the source and can be substantially more
+expensive than a single page.
+
+To read the full text and attachment links for one row, use
+`pboc_read_release()`.
+It returns a `pboc_release` list containing `release_id`, `language`,
+`category`, `title`, `published_at`, `text`, `paragraphs`, `attachments`, and
+`url`. The live operation is deliberately limited to an interactive session:
+
+```{r live-release-text, eval=TRUE}
+if (interactive()) {
+  releases <- pboc_releases(
+    language = "en",
+    category = "financial_statistics",
+    pages = 1L
+  )
+  if (nrow(releases)) {
+    statement <- pboc_read_release(releases[1L, , drop = FALSE])
+    c(
+      title = statement$title,
+      published_at = as.character(statement$published_at),
+      paragraphs = length(statement$paragraphs),
+      attachments = nrow(statement$attachments)
+    )
+  }
+}
+```
+
+## Save a catalog snapshot
+
+`pboc_snapshot()`
+writes a catalog to a CSV path. It is an explicit side effect, so this example
+uses a temporary directory. The structural fixture below has the same catalog
+columns but uses reserved `example.invalid` URLs and synthetic labels; it is
+not an official resource index.
+
+```{r snapshot}
+catalog <- resource_snapshot[seq_len(min(3L, nrow(resource_snapshot))), , drop = FALSE]
+snapshot_dir <- file.path(tempdir(), "readPBOC-vignette-snapshots")
+dir.create(snapshot_dir, recursive = TRUE, showWarnings = FALSE)
+snapshot_path <- file.path(snapshot_dir, "catalog.csv")
+
+pboc_snapshot(catalog, snapshot_path)
+stopifnot(file.exists(snapshot_path))
+identical(pboc_revisions(snapshot_path, catalog)$status, rep("unchanged", nrow(catalog)))
+```
+
+The function returns `path` invisibly. The CSV is suitable for keeping beside
+an extraction run; it does not modify the package or create a global cache.
+
+## Compare two snapshots
+
+`pboc_revisions()`
+matches rows by `asset_id` and compares their current revision metadata. It
+returns a tibble with `asset_id`, `status`, previous/current revision IDs, and
+previous/current URLs. The four statuses are:
+
+* `unchanged`: the asset and revision are present in both snapshots;
+* `revised`: the same asset has a different latest revision;
+* `new`: the asset appears only in the current snapshot; and
+* `removed`: the asset appeared only in the previous snapshot.
+
+The following tiny data frames are synthetic control inputs that make each
+classification visible without contacting the PBOC site. They use the same
+columns as real catalog snapshots; they are not PBOC observations.
+
+```{r revision-statuses}
+previous <- data.frame(
+  asset_id = c("same", "changed", "removed"),
+  revision_id = c("r1", "r1", "r1"),
+  url = paste0("https://example.invalid/", c("same", "old", "removed"), ".xlsx"),
+  stringsAsFactors = FALSE
+)
+current <- data.frame(
+  asset_id = c("same", "changed", "new"),
+  revision_id = c("r1", "r2", "r1"),
+  url = paste0("https://example.invalid/", c("same", "newer", "new"), ".xlsx"),
+  stringsAsFactors = FALSE
+)
+
+changes <- pboc_revisions(previous, current)
+changes[c("asset_id", "status", "previous_revision", "current_revision")]
+```
+
+When a revised file must be retained, use
+`pboc_download()`
+with the catalog row and an explicit destination directory. It names files
+with the attachment/revision identifier, records URL/checksum/size/retrieval
+time in a manifest, and leaves an existing revision alone unless
+`overwrite = TRUE`. Downloading is intentionally not run in this vignette;
+the operation writes files and requires an available official URL.
+
+```{r live-download, eval=TRUE}
+if (interactive()) {
+  destination <- file.path(tempdir(), "readPBOC-downloads")
+  live_catalog <- pboc_catalog(
+    year = 2026,
+    language = "zh",
+    section = "money",
+    formats = c("xlsx", "xls")
+  )
+  if (nrow(live_catalog)) {
+    pboc_download(live_catalog[1L, , drop = FALSE], destination)
+  }
+}
+```
+
+This explicit split—catalog metadata, snapshot, comparison, then optional
+download—makes reruns auditable without depending on a hidden persistent
+cache.

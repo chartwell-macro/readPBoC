@@ -1,0 +1,201 @@
+---
+title: "Network, authentication, and troubleshooting"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Network, authentication, and troubleshooting}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  prompt = FALSE
+)
+source_roots <- c(".", "..")
+source_roots <- source_roots[
+  file.exists(file.path(source_roots, "DESCRIPTION"))
+]
+if (length(source_roots) && requireNamespace("pkgload", quietly = TRUE)) {
+  pkgload::load_all(
+    source_roots[[1L]],
+    quiet = TRUE,
+    export_all = FALSE
+  )
+} else {
+  library(readPBOC)
+}
+
+package_file <- function(...) {
+  pieces <- c(...)
+  relative <- do.call(file.path, as.list(pieces))
+  candidates <- c(
+    file.path(source_roots, "inst", relative),
+    system.file(..., package = "readPBOC")
+  )
+  found <- candidates[
+    nzchar(candidates) & file.exists(candidates) & !dir.exists(candidates)
+  ]
+  if (!length(found)) stop("Could not find packaged file ", paste(pieces, collapse = "/"))
+  normalizePath(found[[1L]], winslash = "/", mustWork = TRUE)
+}
+
+html_fixture <- package_file("extdata", "readpboc-table-fixture.html")
+```
+
+`readPBOC` reads public PBOC pages and attachments. It does not implement an
+authenticated API: no username, password, token, cookie, or environment
+credential is required. The package uses fixed official HTTPS endpoints for
+discovery and follows attachment URLs returned by those pages.
+
+## What is contacted, and what is stored
+
+The discovery functions (`pboc_years()`, `pboc_sections()`,
+`pboc_catalog()`, and `pboc_releases()`) make HTTPS requests to the official
+Chinese or English indexes. `pboc_read()` makes a temporary download when its
+input is a remote spreadsheet or HTML URL, reads it, and removes that
+temporary file after the call. A remote PDF is not parsed: use
+`pboc_download()`
+to retain the official PDF as an explicit local side effect.
+
+There is no persistent cache, startup download, home-directory write, or
+credential store. The functions that intentionally write files are:
+
+* `pboc_download()`,
+  which creates the requested destination directory, preserves each
+  attachment, and writes a CSV manifest by default; and
+* `pboc_snapshot()`,
+  which writes the catalog CSV path supplied by the caller.
+
+Use `tempdir()` in examples and tests when a durable artifact is not the goal.
+
+## Timeouts, retries, and user agents
+
+The default HTTP timeout is 60 seconds. Discovery and release-page fetches make
+up to three total attempts for transport failures, server errors, or HTTP 429,
+with a short increasing backoff. Direct attachment reads and downloads make
+one transfer. Other client HTTP errors stop without treating the response as a
+successful document. The timeout and user-agent string are ordinary R options:
+
+```{r options}
+configured <- local({
+  old <- options("readPBOC.timeout", "readPBOC.user_agent")
+  on.exit(options(old), add = TRUE)
+
+  options(
+    readPBOC.timeout = 30,
+    readPBOC.user_agent = "readPBOC-vignette/0.1"
+  )
+  c(
+    timeout = getOption("readPBOC.timeout"),
+    user_agent = getOption("readPBOC.user_agent")
+  )
+})
+configured
+```
+
+The package does not parallelise requests or require more than one core. Keep
+live traversals narrow (`pages = 1L` while exploring), respect the source
+server, and save a catalog snapshot when a reproducible run needs a stable
+input.
+
+## Offline reading and the PDF boundary
+
+The packaged HTML fixture exercises the local path without a network request.
+It is an author-created structural fixture under the package license, not a
+PBOC product-data extract. It returns one table when the document has one table
+and a list when it has multiple tables. The result carries `source_path` for a
+local file; a local path has no remote `source_url`.
+
+```{r local-html}
+table <- pboc_read(html_fixture)
+stopifnot(is.data.frame(table) || is.list(table))
+c(
+  class = paste(class(table), collapse = ", "),
+  source_path = basename(attr(table, "source_path")),
+  source_url = attr(table, "source_url")
+)
+```
+
+PDFs are deliberately preservation-only. The error is deterministic and is
+raised before any PDF parser is invoked:
+
+```{r pdf-error}
+pdf_path <- tempfile("readPBOC-", fileext = ".pdf")
+file.create(pdf_path)
+pdf_message <- tryCatch(
+  pboc_read(pdf_path),
+  error = function(error) conditionMessage(error)
+)
+unlink(pdf_path)
+pdf_message
+```
+
+For a source workbook, use `pboc_read(..., tidy = TRUE)` to obtain the long
+form described in the `pboc_tidy()`
+reference. HTML parsing is intentionally lighter-weight: it follows the
+current table markup and can need maintenance if the official page changes.
+
+## Common failure modes
+
+### The request fails or the site is unavailable
+
+Check the URL and internet connection, then retry a narrow request. A fetch
+failure is reported as an error; discovery does not silently return stale
+data. The package's short retry policy helps with transient responses but does
+not guarantee site availability. If the site is down, use a previously saved
+catalog/manifest and work from preserved local files.
+
+### `pboc_data()` reports no matching workbook
+
+The `section` and `item` arguments are regular-expression filters over section
+and item labels. Check coverage with `pboc_sections(..., language = "both")`
+or `pboc_catalog(..., language = "both")` to inspect Chinese/English
+differences. In
+`language = "auto"` mode, Chinese is attempted first and English is used only
+when the Chinese catalog call errors or has no matching row. An ambiguous
+match requires a narrower `item`.
+
+### A table has an unexpected shape or warning
+
+PBOC worksheets are published for human reading and can contain bilingual
+headers, repeated tables, notes, or Excel period values. Run
+`pboc_tidy()` on a character worksheet read with `col_names = FALSE`; inspect
+`value_raw`, `unit`, `source_row`, and `source_column` before applying a
+domain-specific conversion. Keep the original workbook with its catalog row.
+
+### The HTML result is empty or has different columns
+
+`pboc_read()` delegates HTML table extraction to `rvest`. Official markup can
+change, and a release article is not necessarily a data table. Re-check the
+source page and preserve its URL; do not assume that an HTML table has the
+same schema as a spreadsheet passed through `pboc_tidy()`.
+
+### The PDF cannot be normalised
+
+This is expected. `readPBOC` does not claim a cross-platform PDF extraction
+schema. Use `pboc_download()` to preserve the official file, then choose a
+separate PDF workflow appropriate to the document.
+
+## Live calls are opt-in in examples
+
+The following pattern is suitable for an exploratory session but is not run by
+CRAN or this offline vignette:
+
+```{r live-pattern, eval=TRUE}
+if (interactive()) {
+  releases <- pboc_releases(
+    language = "en",
+    category = "financial_statistics",
+    pages = 1L
+  )
+  if (nrow(releases)) pboc_read_release(releases[1L, , drop = FALSE])
+}
+```
+
+For deterministic tests, use local fixtures and synthetic catalog frames with
+`pboc_revisions()`;
+do not make test success depend on live PBOC availability.
