@@ -1,0 +1,10 @@
+^readPBOC\.Rproj$
+^\.Rproj\.user$
+^\.github$
+^\.git$
+^\.DS_Store$
+^inst/examples/\.DS_Store$
+^inst/examples/.*\.html$
+^inst/examples/data/.*\.csv$
+^readPBOC_[0-9].*\.tar\.gz$
+^readPBOC\.Rcheck$

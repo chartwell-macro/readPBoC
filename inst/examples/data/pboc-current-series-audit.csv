@@ -1,0 +1,27 @@
+"revision_id","section_id","item","status","workbook_sheets","chartable_sheets","observations"
+"2026071516450066562","aggregate_financing","社会融资规模增量统计表 Aggregate Financing to the Real Economy (Flow)","retrieved",1,1,66
+"2026071516452812082","aggregate_financing","社会融资规模存量统计表 Aggregate Financing to the Real Economy (Stock)","retrieved",1,1,66
+"2026071516553174269","cgpi","企业商品价格指数 Corporate Goods Price Indices (CGPI)","retrieved",1,1,24
+"2026071516543577658","credit_funds","中资全国性中小型银行人民币信贷收支表 Sources & Uses of Credit Funds of medium & small-sized State-owned National-operating Commercial Banks (RMB)","retrieved",1,1,204
+"2026071516535144806","credit_funds","中资全国性四家大型银行人民币信贷收支表 Sources & Uses of Credit Funds of 4 largest State-owned National-operating Commercial Banks (RMB)","retrieved",1,1,204
+"2026071516532267859","credit_funds","中资全国性大型银行人民币信贷收支表 Sources & Uses of Credit Funds of large-sized State-owned National-operating Commercial Banks (RMB)","retrieved",1,1,204
+"2026071516524787642","credit_funds","存款类金融机构人民币信贷收支表 Sources & Uses of Credit Funds of Depository Financial Institutions (RMB)","retrieved",1,1,240
+"2026071516512286976","credit_funds","存款类金融机构外汇信贷收支表 Sources & Uses of Credit Funds of Depository Financial Institutions (in Foreign Currency)","retrieved",1,1,228
+"2026071516501831576","credit_funds","存款类金融机构本外币信贷收支表 Sources & Uses of Credit Funds of Depository Financial Institutions (in RMB and Foreign Currency)","retrieved",1,1,222
+"2026071516521532997","credit_funds","金融机构人民币信贷收支表 Sources & Uses of Credit Funds of Financial Institutions (RMB)","retrieved",1,1,240
+"2026071516505149479","credit_funds","金融机构外汇信贷收支表 Sources & Uses of Credit Funds of Financial Institutions (in Foreign Currency)","retrieved",1,1,120
+"2026071516495043571","credit_funds","金融机构本外币信贷收支表 Sources & Uses of Credit Funds of Financial Institutions (in RMB and Foreign Currency)","retrieved",1,1,222
+"2026073116224049020","financial_markets","Shibor统计表 Statistics of Shibor","retrieved",1,1,48
+"2026073116211258269","financial_markets","中债国债收益统计表 Statistics of Chinabond Government Securities Yield","retrieved",1,1,42
+"2026073116220977065","financial_markets","全国银行间同业拆借交易统计表 Statistics of Interbank Lending","retrieved",1,1,144
+"2026073116222112959","financial_markets","全国银行间质押式回购交易统计表 Statistics of Interbank Pledged Repo","retrieved",1,1,132
+"2026073116205258998","financial_markets","国内各类债券统计表 Statistics of Domestic Debt Securities","retrieved",1,1,72
+"2026073116203050643","financial_markets","股票市场统计表 Statistics of Stock Market","retrieved",1,1,48
+"2026071516474787555","money_and_banking","其他存款性公司资产负债表 Balance Sheet of Other Depository Corporations","retrieved",1,1,186
+"2026073115592496796","money_and_banking","国际储备与外币流动性数据模板 Template on International Reserves and Foreign Currency Liquidity","retrieved",4,3,32
+"2026043016405817661","money_and_banking","境外机构和个人持有境内人民币金融资产情况 Domestic RMB Financial Assets Held by Overseas Entities","retrieved",1,1,12
+"2026071516471484414","money_and_banking","存款性公司概览 Depository Corporations Survey","retrieved",1,1,102
+"2026070716051681267","money_and_banking","官方储备资产 Official reserve assets","retrieved",1,1,36
+"2026071516484381222","money_and_banking","汇率报表 Exchange Rate","retrieved",1,1,18
+"2026071516481518348","money_and_banking","货币供应量 Money Supply","retrieved",1,1,18
+"2026071516462779749","money_and_banking","货币当局资产负债表 Balance Sheet of Monetary Authority","retrieved",1,1,132

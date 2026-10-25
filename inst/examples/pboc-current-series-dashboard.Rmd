@@ -1,0 +1,763 @@
+---
+title: "People's Bank of China current statistical values"
+subtitle: "Major series from every current official statistical table"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    self_contained: true
+    theme: cosmo
+    toc: true
+    toc_float: true
+    code_folding: hide
+params:
+  refresh_data: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6.5,
+  fig.retina = 2,
+  out.width = "100%"
+)
+
+input_file <- knitr::current_input(dir = TRUE)
+example_dir <- dirname(normalizePath(input_file, mustWork = TRUE))
+project_root <- normalizePath(
+  file.path(example_dir, "..", ".."),
+  mustWork = FALSE
+)
+
+if (file.exists(file.path(project_root, "DESCRIPTION"))) {
+  pkgload::load_all(project_root, quiet = TRUE)
+} else {
+  library(readPBOC)
+}
+
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+refresh_script <- file.path(
+  example_dir,
+  "refresh-pboc-current-series-data.R"
+)
+catalog_rds <- file.path(
+  example_dir,
+  "data",
+  "pboc-current-series-catalog.rds"
+)
+values_rds <- file.path(
+  example_dir,
+  "data",
+  "pboc-current-series-values.rds"
+)
+audit_rds <- file.path(
+  example_dir,
+  "data",
+  "pboc-current-series-audit.rds"
+)
+
+if (isTRUE(params$refresh_data) ||
+    !all(file.exists(c(catalog_rds, values_rds, audit_rds)))) {
+  source(refresh_script, local = TRUE)
+  refreshed <- refresh_current_series_data(example_dir)
+  current_catalog <- refreshed$catalog
+  current_values <- refreshed$values
+  current_audit <- refreshed$audit
+} else {
+  current_catalog <- readRDS(catalog_rds)
+  current_values <- readRDS(values_rds)
+  current_audit <- readRDS(audit_rds)
+}
+
+current_catalog <- tibble::as_tibble(current_catalog)
+current_values <- tibble::as_tibble(current_values)
+current_audit <- tibble::as_tibble(current_audit)
+
+parse_period_date <- function(x) {
+  x <- as.character(x)
+  result <- rep(as.Date(NA), length(x))
+
+  full_date <- grepl(
+    "^(19|20)[0-9]{2}-[0-9]{2}-[0-9]{2}$",
+    x
+  )
+  result[full_date] <- as.Date(x[full_date])
+
+  year_month <- grepl(
+    "^(19|20)[0-9]{2}[./-](0?[1-9]|1[0-2])$",
+    x
+  )
+  pieces <- strsplit(x[year_month], "[./-]")
+  result[year_month] <- as.Date(vapply(
+    pieces,
+    function(piece) {
+      sprintf("%04d-%02d-01", as.integer(piece[1]), as.integer(piece[2]))
+    },
+    character(1)
+  ))
+  result
+}
+
+section_labels <- c(
+  aggregate_financing = "Aggregate financing",
+  cgpi = "Corporate goods prices",
+  credit_funds = "Credit funds",
+  financial_markets = "Financial markets",
+  money_and_banking = "Money and banking"
+)
+
+current_values <- current_values |>
+  mutate(
+    published_at = as.Date(published_at),
+    period_date = parse_period_date(period),
+    section = unname(section_labels[section_id])
+  )
+
+plot_values <- current_values |>
+  group_by(
+    revision_id,
+    release_title,
+    release_title_zh,
+    release_title_en,
+    published_at,
+    source_url,
+    section_id,
+    section,
+    sheet,
+    series,
+    period,
+    period_date,
+    unit
+  ) |>
+  summarise(
+    value = case_when(
+      grepl("^Outstanding$", first(series), ignore.case = TRUE) ~
+        sum(value, na.rm = TRUE),
+      grepl("Interest Rate", first(series), ignore.case = TRUE) ~
+        mean(value, na.rm = TRUE),
+      TRUE ~ value[which.max(abs(value))]
+    ),
+    .groups = "drop"
+  )
+
+series_patterns <- function(title) {
+  if (grepl("Aggregate Financing.*Flow", title, ignore.case = TRUE)) {
+    return(c(
+      "^AFRE\\(flow\\)$",
+      "^RMB loans$",
+      "^Government bonds$",
+      "corporate bonds",
+      "Equity financing",
+      "Undiscounted"
+    ))
+  }
+  if (grepl("Aggregate Financing.*Stock", title, ignore.case = TRUE)) {
+    return(c(
+      "^AFRE\\(stock\\)$",
+      "^RMB loans$",
+      "^Government bonds$",
+      "corporate bonds",
+      "Equity financing",
+      "^Trust loans$"
+    ))
+  }
+  if (grepl("Corporate Goods Price", title, ignore.case = TRUE)) {
+    return(c(
+      "overall index",
+      "agricultural",
+      "mining",
+      "coal"
+    ))
+  }
+  if (grepl("Sources & Uses of Credit Funds", title, fixed = TRUE)) {
+    return(c(
+      "^Total Funds Sources$",
+      "^Total Funds Uses$",
+      "^Total Deposits$",
+      "^Total Loans$",
+      "^Domestic Deposits$",
+      "^Domestic Loans$"
+    ))
+  }
+  if (grepl("Shibor", title, ignore.case = TRUE)) {
+    return(c(
+      "^Overnight$",
+      "^1-Week$",
+      "^1-Month$",
+      "^3-Month$",
+      "^6-Month$",
+      "^1-Year$"
+    ))
+  }
+  if (grepl("Government Securities Yield", title, ignore.case = TRUE)) {
+    return(c(
+      "^1-Year$",
+      "^3-Year$",
+      "^5-Year$",
+      "^7-Year$",
+      "^10-Year$",
+      "^30-Year$"
+    ))
+  }
+  if (grepl("Interbank Lending|Pledged Repo", title, ignore.case = TRUE)) {
+    return(c(
+      "^Total Trading Volume$",
+      "^1-Day Trading Volume$",
+      "^7-Day Trading Volume$",
+      "^14-Day Trading Volume$",
+      "^1-Month Trading Volume$",
+      "^3-Month Trading Volume$"
+    ))
+  }
+  if (grepl("Domestic Debt Securities", title, ignore.case = TRUE)) {
+    return(c(
+      "^Total Issue$",
+      "^Outstanding$",
+      "Government Securities Issue",
+      "Financial Bonds Issue",
+      "Corporate Debenture Bonds Issue",
+      "Central Bank Bills Issue"
+    ))
+  }
+  if (grepl("Stock Market", title, ignore.case = TRUE)) {
+    return(c(
+      "Total Market Capitalization",
+      "Shanghai Stock Exchange",
+      "Shenzhen Stock Exchange",
+      "Turnover of Trading",
+      "Equity Financing",
+      "Number of listed company"
+    ))
+  }
+  if (grepl("Other Depository Corporations", title, ignore.case = TRUE)) {
+    return(c(
+      "^Total Assets$",
+      "^Total  Liabilities$|^Total Liabilities$",
+      "Deposits Included in Broad Money",
+      "Claims on Non-financial Institutions",
+      "^Foreign Assets$",
+      "^Reserve Assets$"
+    ))
+  }
+  if (grepl("International Reserves and Foreign Currency Liquidity",
+            title, ignore.case = TRUE)) {
+    return(c(
+      "Official reserve assets$",
+      "Foreign currency reserves",
+      "Gold \\(",
+      "Other foreign currency assets",
+      "IMF reserve position",
+      "SDRs$"
+    ))
+  }
+  if (grepl("Overseas Entities", title, ignore.case = TRUE)) {
+    return(c("^Bonds$", "^Equities$", "^Deposits$", "^Loans$"))
+  }
+  if (grepl("Depository Corporations Survey", title, ignore.case = TRUE)) {
+    return(c(
+      "^Money & Quasi Money$",
+      "^Money$",
+      "^Quasi Money$",
+      "^Domestic Credits$",
+      "Claims on Non-financial Sectors",
+      "^Net  Foreign Assets$|^Net Foreign Assets$"
+    ))
+  }
+  if (grepl("Official reserve assets", title, ignore.case = TRUE)) {
+    return(c(
+      "^Total$",
+      "^Foreign currency reserves$",
+      "^Gold$",
+      "^SDRs$",
+      "^IMF reserve position$",
+      "^Other reserve assets$"
+    ))
+  }
+  if (grepl("Exchange Rate", title, ignore.case = TRUE)) {
+    return(c(
+      "US Dollar \\( End of Period",
+      "US Dollar \\( Period Average",
+      "Yuan per SDR"
+    ))
+  }
+  if (grepl("Money Supply", title, ignore.case = TRUE)) {
+    return(c(
+      "^Money & Quasi-money$",
+      "^Money$",
+      "^Currency in Circulation$"
+    ))
+  }
+  if (grepl("Monetary Authority", title, ignore.case = TRUE)) {
+    return(c(
+      "^Total Assets$",
+      "^Total  Liabilities$|^Total Liabilities$",
+      "^Reserve Money$",
+      "^Foreign Assets$",
+      "^Foreign Exchange$",
+      "Claims on Other Depository Corporations"
+    ))
+  }
+  character()
+}
+
+select_major_series <- function(data, maximum = 6L) {
+  title <- data$release_title_en[[1L]]
+  available <- unique(data$series)
+  selected <- character()
+
+  for (pattern in series_patterns(title)) {
+    matches <- grep(
+      pattern,
+      available,
+      ignore.case = TRUE,
+      perl = TRUE,
+      value = TRUE
+    )
+    matches <- setdiff(matches, selected)
+    if (length(matches)) selected <- c(selected, matches[[1L]])
+    if (length(selected) >= maximum) break
+  }
+
+  latest <- data |>
+    group_by(series) |>
+    arrange(period_date, .by_group = TRUE) |>
+    summarise(
+      latest = dplyr::last(value),
+      periods = n_distinct(period_date),
+      .groups = "drop"
+    ) |>
+    mutate(
+      is_other = grepl(
+        "^Other|Other Items|Other Assets|Other Liabilities",
+        series,
+        ignore.case = TRUE
+      )
+    ) |>
+    arrange(is_other, desc(abs(latest)), desc(periods))
+
+  selected <- unique(c(selected, latest$series))
+  utils::head(selected, maximum)
+}
+
+short_release_title <- function(title) {
+  replacements <- c(
+    "Aggregate Financing to the Real Economy (Flow)" = "AFRE flow",
+    "Aggregate Financing to the Real Economy (Stock)" = "AFRE stock",
+    "Corporate Goods Price Indices (CGPI)" = "Corporate goods prices",
+    "Statistics of Shibor" = "Shibor",
+    "Statistics of Chinabond Government Securities Yield" =
+      "Government bond yields",
+    "Statistics of Interbank Lending" = "Interbank lending",
+    "Statistics of Interbank Pledged Repo" = "Pledged repo",
+    "Statistics of Domestic Debt Securities" = "Domestic debt securities",
+    "Statistics of Stock Market" = "Stock market",
+    "Balance Sheet of Other Depository Corporations" =
+      "Other depository corporations",
+    "Template on International Reserves and Foreign Currency Liquidity" =
+      "International reserves template",
+    "Domestic RMB Financial Assets Held by Overseas Entities" =
+      "Overseas holdings",
+    "Depository Corporations Survey" = "Depository corporations survey",
+    "Official reserve assets" = "Official reserves",
+    "Exchange Rate" = "Exchange rates",
+    "Money Supply" = "Money supply",
+    "Balance Sheet of Monetary Authority" = "Monetary authority"
+  )
+  if (title %in% names(replacements)) {
+    return(unname(replacements[[title]]))
+  }
+  title <- sub(
+    "^Sources & Uses of Credit Funds of ",
+    "",
+    title
+  )
+  title <- sub(
+    " State-owned National-operating Commercial Banks",
+    " banks",
+    title,
+    fixed = TRUE
+  )
+  title <- sub(
+    "^Depository Financial Institutions ",
+    "Depository institutions ",
+    title
+  )
+  title <- sub(
+    "^Financial Institutions ",
+    "Financial institutions ",
+    title
+  )
+  title
+}
+
+facet_label <- function(x) {
+  vapply(
+    x,
+    function(value) paste(strwrap(value, width = 34L), collapse = "\n"),
+    character(1)
+  )
+}
+
+theme_pboc_values <- function() {
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title.position = "plot",
+      plot.title = element_text(face = "bold", size = 15),
+      plot.subtitle = element_text(colour = "#4A5560"),
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(colour = "#E8EBED"),
+      strip.text = element_text(face = "bold", size = 10),
+      axis.title = element_text(colour = "#4A5560"),
+      legend.position = "none"
+    )
+}
+
+release_plot <- function(data) {
+  selected <- select_major_series(data)
+  chart <- data |>
+    filter(series %in% selected) |>
+    mutate(
+      series = factor(series, levels = selected)
+    )
+
+  if (n_distinct(chart$period_date) == 1L) {
+    latest <- chart |>
+      group_by(series) |>
+      summarise(value = value[which.max(abs(value))], .groups = "drop")
+    ggplot(
+      latest,
+      aes(x = reorder(series, abs(value)), y = value)
+    ) +
+      geom_col(fill = "#A61B29", width = 0.68) +
+      geom_text(
+        aes(label = label_number(
+          accuracy = 0.01,
+          scale_cut = cut_short_scale()
+        )(value)),
+        hjust = ifelse(latest$value >= 0, -0.08, 1.08),
+        colour = "#27343D",
+        size = 3.5
+      ) +
+      coord_flip(clip = "off") +
+      scale_y_continuous(
+        labels = label_number(scale_cut = cut_short_scale()),
+        expand = expansion(mult = c(0.14, 0.16))
+      ) +
+      labs(
+        title = "Major values in the current release",
+        subtitle = format(
+          max(chart$published_at),
+          "Published %d %B %Y"
+        ),
+        x = NULL,
+        y = "Official reported value"
+      ) +
+      theme_pboc_values()
+  } else {
+    latest_date <- max(chart$period_date, na.rm = TRUE)
+    labels <- chart |>
+      filter(period_date == latest_date) |>
+      group_by(series) |>
+      summarise(
+        period_date = first(period_date),
+        value = value[which.max(abs(value))],
+        .groups = "drop"
+      )
+
+    ggplot(
+      chart,
+      aes(x = period_date, y = value, group = 1)
+    ) +
+      geom_line(colour = "#265D84", linewidth = 0.8) +
+      geom_point(colour = "#A61B29", size = 2) +
+      geom_text(
+        data = labels,
+        aes(
+          label = label_number(
+            accuracy = 0.01,
+            scale_cut = cut_short_scale()
+          )(value)
+        ),
+        hjust = -0.12,
+        colour = "#27343D",
+        size = 3.2
+      ) +
+      facet_wrap(
+        ~ series,
+        scales = "free_y",
+        ncol = 2,
+        labeller = labeller(series = facet_label)
+      ) +
+      scale_x_date(
+        date_breaks = "1 month",
+        date_labels = "%b",
+        expand = expansion(mult = c(0.02, 0.18))
+      ) +
+      scale_y_continuous(
+        labels = label_number(scale_cut = cut_short_scale()),
+        expand = expansion(mult = c(0.12, 0.18))
+      ) +
+      labs(
+        title = "Major series across the current release",
+        subtitle = paste(
+          format(min(chart$period_date), "%B %Y"),
+          "through",
+          format(max(chart$period_date), "%B %Y")
+        ),
+        x = NULL,
+        y = "Official reported value"
+      ) +
+      theme_pboc_values()
+  }
+}
+
+latest_major_values <- function(data) {
+  selected <- select_major_series(data)
+  data |>
+    filter(series %in% selected) |>
+    group_by(series) |>
+    filter(period_date == max(period_date, na.rm = TRUE)) |>
+    summarise(
+      Period = format(first(period_date), "%Y-%m"),
+      Value = value[which.max(abs(value))],
+      .groups = "drop"
+    ) |>
+    mutate(
+      Series = series,
+      Value = number(Value, accuracy = 0.01, big.mark = ",")
+    ) |>
+    select(Series, Period, Value)
+}
+
+snapshot_time <- file.info(values_rds)$mtime
+if (is.na(snapshot_time)) snapshot_time <- Sys.time()
+```
+
+```{css, echo=FALSE}
+.dashboard-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(145px, 1fr));
+  gap: 14px;
+  margin: 18px 0 26px 0;
+}
+.dashboard-metric {
+  border-top: 4px solid #a61b29;
+  background: #f5f7f8;
+  padding: 15px 16px;
+}
+.dashboard-metric-value {
+  display: block;
+  color: #18222b;
+  font-size: 25px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.dashboard-metric-label {
+  color: #52606b;
+  font-size: 13px;
+}
+.release-meta {
+  border-left: 4px solid #265d84;
+  background: #f3f7fa;
+  padding: 10px 14px;
+  margin: 12px 0 18px 0;
+}
+.release-title-zh {
+  color: #52606b;
+}
+@media (max-width: 760px) {
+  .dashboard-metrics {
+    grid-template-columns: repeat(2, minmax(130px, 1fr));
+  }
+}
+```
+
+The Chinese statistical archive supplies the complete current-year collection.
+The dashboard selects the latest official workbook for each distinct
+statistical table, reads it through `readPBOC`, and charts its major reported
+series. Each release has its own tab inside the corresponding statistical
+section.
+
+```{r metrics, echo=FALSE, results='asis'}
+cat(
+  '<div class="dashboard-metrics">',
+  sprintf(
+    paste0(
+      '<div class="dashboard-metric">',
+      '<span class="dashboard-metric-value">%s</span>',
+      '<span class="dashboard-metric-label">Current statistical releases</span>',
+      '</div>'
+    ),
+    comma(nrow(current_catalog))
+  ),
+  sprintf(
+    paste0(
+      '<div class="dashboard-metric">',
+      '<span class="dashboard-metric-value">%s</span>',
+      '<span class="dashboard-metric-label">Normalised values</span>',
+      '</div>'
+    ),
+    comma(nrow(current_values))
+  ),
+  sprintf(
+    paste0(
+      '<div class="dashboard-metric">',
+      '<span class="dashboard-metric-value">%s</span>',
+      '<span class="dashboard-metric-label">Statistical sections</span>',
+      '</div>'
+    ),
+    n_distinct(current_catalog$section_id)
+  ),
+  sprintf(
+    paste0(
+      '<div class="dashboard-metric">',
+      '<span class="dashboard-metric-value">%s</span>',
+      '<span class="dashboard-metric-label">Releases with value charts</span>',
+      '</div>'
+    ),
+    sum(current_audit$status == "retrieved")
+  ),
+  '</div>'
+)
+```
+
+Snapshot refreshed at `r format(snapshot_time, "%Y-%m-%d %H:%M %Z")`.
+The workbook publication dates span
+`r format(min(current_catalog$published_at), "%d %B %Y")` through
+`r format(max(current_catalog$published_at), "%d %B %Y")`.
+
+## Coverage overview
+
+```{r coverage-overview}
+coverage <- current_catalog |>
+  count(section_id, name = "releases") |>
+  mutate(section = unname(section_labels[section_id]))
+
+ggplot(
+  coverage,
+  aes(x = reorder(section, releases), y = releases)
+) +
+  geom_col(fill = "#265D84", width = 0.68) +
+  geom_text(
+    aes(label = releases),
+    hjust = -0.18,
+    colour = "#27343D",
+    size = 4
+  ) +
+  coord_flip(clip = "off") +
+  scale_y_continuous(
+    breaks = pretty_breaks(),
+    expand = expansion(mult = c(0, 0.15))
+  ) +
+  labs(
+    title = "Every current statistical table has a dedicated release tab",
+    subtitle = paste(
+      comma(nrow(current_values)),
+      "reported values across",
+      nrow(current_catalog),
+      "current releases"
+    ),
+    x = NULL,
+    y = "Current releases"
+  ) +
+  theme_pboc_values()
+```
+
+```{r release-tabs, echo=FALSE, results='asis', fig.height=6.8}
+section_order <- names(section_labels)
+
+for (section_id_value in section_order) {
+  section_records <- current_catalog |>
+    filter(section_id == section_id_value) |>
+    arrange(item_en)
+  if (!nrow(section_records)) next
+
+  cat(
+    "\n## ",
+    unname(section_labels[[section_id_value]]),
+    " {.tabset .tabset-pills}\n\n",
+    sep = ""
+  )
+
+  for (i in seq_len(nrow(section_records))) {
+    record <- section_records[i, ]
+    release_data <- plot_values |>
+      filter(revision_id == record$revision_id)
+    audit_row <- current_audit |>
+      filter(revision_id == record$revision_id)
+    tab_title <- short_release_title(record$item_en)
+
+    cat("### ", tab_title, "\n\n", sep = "")
+    cat(
+      '<p class="release-title-zh">',
+      record$item_zh,
+      '</p>\n\n',
+      sep = ""
+    )
+    cat(
+      '<div class="release-meta">',
+      '<strong>Published:</strong> ',
+      format(record$published_at, "%d %B %Y"),
+      ' &nbsp; <strong>Values:</strong> ',
+      comma(audit_row$observations),
+      ' &nbsp; <strong>Series:</strong> ',
+      comma(n_distinct(release_data$series)),
+      '<br><a href="',
+      record$url,
+      '">Open the official PBOC workbook</a>',
+      '</div>\n\n',
+      sep = ""
+    )
+
+    print(release_plot(release_data))
+    cat("\n\n")
+    cat(
+      knitr::kable(
+        latest_major_values(release_data),
+        format = "html",
+        align = c("l", "l", "r"),
+        caption = "Latest values for the selected major series"
+      ),
+      sep = "\n"
+    )
+    cat("\n\n")
+  }
+}
+```
+
+## Rebuild the current values
+
+Render the included data snapshot:
+
+```r
+rmarkdown::render(
+  "inst/examples/pboc-current-series-dashboard.Rmd"
+)
+```
+
+Refresh the current official catalog, download every latest workbook, normalise
+the reported values, and render:
+
+```r
+rmarkdown::render(
+  "inst/examples/pboc-current-series-dashboard.Rmd",
+  params = list(refresh_data = TRUE)
+)
+```
+
+The refresh workflow uses these public package functions:
+
+```r
+current_year <- max(pboc_years("both")$year)
+catalog <- pboc_catalog(
+  current_year,
+  language = "zh",
+  formats = c("xlsx", "xls")
+)
+values <- pboc_read(catalog[1, ], sheet = NA, tidy = TRUE)
+```

@@ -1,0 +1,665 @@
+---
+title: "People's Bank of China release coverage"
+subtitle: "A bilingual, complete-index dashboard built with readPBOC and ggplot2"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    self_contained: true
+    theme: cosmo
+    toc: true
+    toc_float: true
+    code_folding: hide
+params:
+  refresh_index: false
+  refresh_text_audit: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 5.8,
+  fig.retina = 2,
+  out.width = "100%"
+)
+
+input_file <- knitr::current_input(dir = TRUE)
+example_dir <- dirname(normalizePath(input_file, mustWork = TRUE))
+project_root <- normalizePath(
+  file.path(example_dir, "..", ".."),
+  mustWork = FALSE
+)
+
+if (file.exists(file.path(project_root, "DESCRIPTION"))) {
+  pkgload::load_all(project_root, quiet = TRUE)
+} else {
+  library(readPBOC)
+}
+
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+index_rds <- file.path(example_dir, "data", "pboc-release-index.rds")
+index_csv <- file.path(example_dir, "data", "pboc-release-index.csv")
+audit_rds <- file.path(example_dir, "data", "pboc-release-text-audit.rds")
+audit_csv <- file.path(example_dir, "data", "pboc-release-text-audit.csv")
+
+if (isTRUE(params$refresh_index)) {
+  releases <- pboc_releases(language = "both", pages = "all")
+  dir.create(dirname(index_rds), recursive = TRUE, showWarnings = FALSE)
+  saveRDS(releases, index_rds, version = 3)
+  utils::write.csv(releases, index_csv, row.names = FALSE, na = "")
+} else if (file.exists(index_rds)) {
+  releases <- readRDS(index_rds)
+} else {
+  releases <- pboc_releases(language = "both", pages = "all")
+}
+
+release_index <- tibble::as_tibble(releases) |>
+  mutate(
+    published_at = as.Date(published_at),
+    year = as.integer(format(published_at, "%Y")),
+    month = factor(
+      format(published_at, "%b"),
+      levels = month.abb,
+      ordered = TRUE
+    ),
+    language_label = recode(
+      language,
+      zh = "Chinese",
+      en = "English"
+    ),
+    feed = recode(
+      category,
+      data_interpretation = "Chinese data interpretation",
+      aggregate_financing = "English aggregate financing",
+      financial_markets = "English financial markets",
+      financial_statistics = "English financial statistics",
+      general = "English general releases",
+      other = "English other statistics"
+    )
+  )
+
+language_colours <- c(
+  Chinese = "#A61B29",
+  English = "#265D84"
+)
+
+theme_pboc <- function() {
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title.position = "plot",
+      plot.title = element_text(face = "bold", size = 15),
+      plot.subtitle = element_text(colour = "#4A5560"),
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(colour = "#E8EBED"),
+      legend.position = "top",
+      legend.title = element_blank(),
+      strip.text = element_text(face = "bold"),
+      axis.title = element_text(colour = "#4A5560")
+    )
+}
+
+feed_summary <- release_index |>
+  group_by(language_label, feed) |>
+  summarise(
+    releases = n(),
+    index_pages = n_distinct(source_url),
+    earliest = min(published_at),
+    latest = max(published_at),
+    .groups = "drop"
+  )
+
+annual_counts <- release_index |>
+  count(year, language_label, name = "releases")
+
+category_counts <- release_index |>
+  count(feed, language_label, name = "releases")
+
+heatmap_counts <- release_index |>
+  count(feed, year, name = "releases")
+
+monthly_counts <- release_index |>
+  count(year, month, language_label, name = "releases")
+
+completeness <- tibble::tibble(
+  field = c(
+    "Release identifier",
+    "Language",
+    "Category",
+    "Title",
+    "Publication date",
+    "Release URL",
+    "Source-page URL"
+  ),
+  complete = c(
+    sum(!is.na(release_index$release_id) &
+          nzchar(release_index$release_id)),
+    sum(!is.na(release_index$language) &
+          nzchar(release_index$language)),
+    sum(!is.na(release_index$category) &
+          nzchar(release_index$category)),
+    sum(!is.na(release_index$title) &
+          nzchar(release_index$title)),
+    sum(!is.na(release_index$published_at)),
+    sum(!is.na(release_index$url) &
+          nzchar(release_index$url)),
+    sum(!is.na(release_index$source_url) &
+          nzchar(release_index$source_url))
+  )
+) |>
+  mutate(
+    total = nrow(release_index),
+    share = complete / total
+  )
+
+run_text_audit <- function(index) {
+  split_rows <- split(
+    seq_len(nrow(index)),
+    interaction(index$language, index$category, drop = TRUE)
+  )
+  jobs <- do.call(
+    rbind,
+    lapply(split_rows, function(rows) {
+      data.frame(
+        row = c(
+          rows[which.min(index$published_at[rows])],
+          rows[which.max(index$published_at[rows])]
+        ),
+        endpoint = c("Earliest", "Latest")
+      )
+    })
+  )
+
+  rows <- lapply(seq_len(nrow(jobs)), function(i) {
+    record <- index[jobs$row[i], , drop = FALSE]
+    tryCatch(
+      {
+        document <- pboc_read_release(record)
+        tibble::tibble(
+          release_id = record$release_id,
+          language = record$language,
+          category = record$category,
+          title = record$title,
+          published_at = record$published_at,
+          url = record$url,
+          endpoint = jobs$endpoint[i],
+          status = "retrieved",
+          text_characters = nchar(document$text),
+          paragraphs = length(document$paragraphs),
+          attachments = nrow(document$attachments)
+        )
+      },
+      error = function(e) {
+        tibble::tibble(
+          release_id = record$release_id,
+          language = record$language,
+          category = record$category,
+          title = record$title,
+          published_at = record$published_at,
+          url = record$url,
+          endpoint = jobs$endpoint[i],
+          status = conditionMessage(e),
+          text_characters = NA_integer_,
+          paragraphs = NA_integer_,
+          attachments = NA_integer_
+        )
+      }
+    )
+  })
+
+  bind_rows(rows)
+}
+
+if (isTRUE(params$refresh_text_audit)) {
+  text_audit <- run_text_audit(release_index)
+  dir.create(dirname(audit_rds), recursive = TRUE, showWarnings = FALSE)
+  saveRDS(text_audit, audit_rds, version = 3)
+  utils::write.csv(text_audit, audit_csv, row.names = FALSE, na = "")
+} else if (file.exists(audit_rds)) {
+  text_audit <- tibble::as_tibble(readRDS(audit_rds))
+} else {
+  text_audit <- run_text_audit(release_index)
+}
+
+text_audit <- text_audit |>
+  mutate(
+    published_at = as.Date(published_at),
+    endpoint = factor(
+      tools::toTitleCase(endpoint),
+      levels = c("Earliest", "Latest")
+    ),
+    feed = recode(
+      category,
+      data_interpretation = "Chinese data interpretation",
+      aggregate_financing = "English aggregate financing",
+      financial_markets = "English financial markets",
+      financial_statistics = "English financial statistics",
+      general = "English general releases",
+      other = "English other statistics"
+    )
+  )
+
+snapshot_time <- file.info(index_rds)$mtime
+if (is.na(snapshot_time)) snapshot_time <- Sys.time()
+```
+
+```{css, echo=FALSE}
+.dashboard-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(145px, 1fr));
+  gap: 14px;
+  margin: 18px 0 26px 0;
+}
+.dashboard-metric {
+  border-top: 4px solid #a61b29;
+  background: #f5f7f8;
+  padding: 15px 16px;
+}
+.dashboard-metric-value {
+  display: block;
+  color: #18222b;
+  font-size: 25px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.dashboard-metric-label {
+  color: #52606b;
+  font-size: 13px;
+}
+.coverage-note {
+  border-left: 4px solid #265d84;
+  background: #f3f7fa;
+  padding: 12px 16px;
+  margin: 16px 0;
+}
+@media (max-width: 760px) {
+  .dashboard-metrics {
+    grid-template-columns: repeat(2, minmax(130px, 1fr));
+  }
+}
+```
+
+This dashboard calls `readPBOC` to traverse every page reported by every
+configured Chinese and English release index. Its charts and searchable
+inventory use every indexed release. The frozen snapshot provides a
+reproducible view, and the refresh parameters rebuild it directly from the
+official PBOC websites.
+
+```{r metrics, echo=FALSE, results='asis'}
+cat(
+  '<div class="dashboard-metrics">',
+  sprintf(
+    paste0(
+      '<div class="dashboard-metric">',
+      '<span class="dashboard-metric-value">%s</span>',
+      '<span class="dashboard-metric-label">Unique releases</span>',
+      '</div>'
+    ),
+    comma(nrow(release_index))
+  ),
+  sprintf(
+    paste0(
+      '<div class="dashboard-metric">',
+      '<span class="dashboard-metric-value">%s</span>',
+      '<span class="dashboard-metric-label">Official release feeds</span>',
+      '</div>'
+    ),
+    n_distinct(release_index$feed)
+  ),
+  sprintf(
+    paste0(
+      '<div class="dashboard-metric">',
+      '<span class="dashboard-metric-value">%s</span>',
+      '<span class="dashboard-metric-label">Index pages traversed</span>',
+      '</div>'
+    ),
+    comma(n_distinct(release_index$source_url))
+  ),
+  sprintf(
+    paste0(
+      '<div class="dashboard-metric">',
+      '<span class="dashboard-metric-value">%s–%s</span>',
+      '<span class="dashboard-metric-label">Publication span</span>',
+      '</div>'
+    ),
+    format(min(release_index$published_at), "%Y"),
+    format(max(release_index$published_at), "%Y")
+  ),
+  '</div>'
+)
+```
+
+<div class="coverage-note">
+Snapshot retrieved at `r format(snapshot_time, "%Y-%m-%d %H:%M %Z")`.
+It spans `r format(min(release_index$published_at), "%d %B %Y")` through
+`r format(max(release_index$published_at), "%d %B %Y")`.
+</div>
+
+## Release history {.tabset}
+
+### Annual coverage
+
+Every annual bar uses the complete bilingual release index.
+
+```{r annual-coverage}
+ggplot(
+  annual_counts,
+  aes(x = year, y = releases, fill = language_label)
+) +
+  geom_col(position = position_dodge2(width = 0.84, preserve = "single")) +
+  scale_fill_manual(values = language_colours) +
+  scale_x_continuous(
+    breaks = seq(
+      floor(min(annual_counts$year) / 5) * 5,
+      max(annual_counts$year),
+      by = 5
+    )
+  ) +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.08))) +
+  labs(
+    title = "PBOC releases indexed by year and website language",
+    subtitle = paste(
+      "All",
+      comma(nrow(release_index)),
+      "release records contribute to the annual counts"
+    ),
+    x = NULL,
+    y = "Releases"
+  ) +
+  theme_pboc()
+```
+
+### Cumulative archive
+
+```{r cumulative-coverage}
+cumulative <- release_index |>
+  arrange(language_label, published_at, release_id) |>
+  group_by(language_label) |>
+  mutate(releases = row_number()) |>
+  ungroup()
+
+ggplot(
+  cumulative,
+  aes(x = published_at, y = releases, colour = language_label)
+) +
+  geom_step(linewidth = 1) +
+  scale_colour_manual(values = language_colours) +
+  scale_x_date(date_breaks = "3 years", date_labels = "%Y") +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.05))) +
+  labs(
+    title = "Cumulative releases across both official websites",
+    subtitle = "The Chinese and English archives form two independently indexed histories",
+    x = NULL,
+    y = "Cumulative releases"
+  ) +
+  theme_pboc()
+```
+
+### Monthly cadence
+
+```{r monthly-cadence}
+ggplot(
+  monthly_counts,
+  aes(x = year, y = month, fill = releases)
+) +
+  geom_tile(colour = "white", linewidth = 0.25) +
+  facet_wrap(~ language_label, ncol = 1) +
+  scale_fill_gradient(low = "#EEF2F4", high = "#A61B29") +
+  scale_x_continuous(
+    breaks = seq(
+      floor(min(monthly_counts$year) / 5) * 5,
+      max(monthly_counts$year),
+      by = 5
+    )
+  ) +
+  labs(
+    title = "Release cadence by month",
+    subtitle = "Darker cells contain more releases",
+    x = NULL,
+    y = NULL,
+    fill = "Releases"
+  ) +
+  theme_pboc() +
+  theme(panel.grid = element_blank())
+```
+
+## Feed coverage {.tabset}
+
+### Releases by feed
+
+```{r releases-by-feed}
+ggplot(
+  category_counts,
+  aes(
+    x = reorder(feed, releases),
+    y = releases,
+    fill = language_label
+  )
+) +
+  geom_col(width = 0.68) +
+  geom_text(
+    aes(label = comma(releases)),
+    hjust = -0.12,
+    colour = "#28343D",
+    size = 3.8
+  ) +
+  coord_flip(clip = "off") +
+  scale_fill_manual(values = language_colours) +
+  scale_y_continuous(
+    labels = comma,
+    expand = expansion(mult = c(0, 0.14))
+  ) +
+  labs(
+    title = "Every configured release feed contributes to the index",
+    x = NULL,
+    y = "Releases"
+  ) +
+  theme_pboc()
+```
+
+### Feed history
+
+```{r feed-history, fig.height=6.8}
+ggplot(
+  heatmap_counts,
+  aes(x = year, y = feed, fill = releases)
+) +
+  geom_tile(colour = "white", linewidth = 0.3) +
+  scale_fill_gradient(low = "#EEF2F4", high = "#A61B29") +
+  scale_x_continuous(
+    breaks = seq(
+      floor(min(heatmap_counts$year) / 5) * 5,
+      max(heatmap_counts$year),
+      by = 5
+    )
+  ) +
+  labs(
+    title = "Each feed's full publication history",
+    subtitle = "Every cell counts release records from the complete index",
+    x = NULL,
+    y = NULL,
+    fill = "Releases"
+  ) +
+  theme_pboc() +
+  theme(panel.grid = element_blank())
+```
+
+### Feed totals
+
+```{r feed-summary}
+knitr::kable(
+  feed_summary |>
+    arrange(language_label, desc(releases)) |>
+    transmute(
+      Language = language_label,
+      Feed = feed,
+      Releases = releases,
+      `Index pages` = index_pages,
+      Earliest = format(earliest, "%Y-%m-%d"),
+      Latest = format(latest, "%Y-%m-%d")
+    ),
+  format.args = list(big.mark = ","),
+  align = c("l", "l", "r", "r", "l", "l")
+)
+```
+
+## Coverage audit {.tabset}
+
+### Metadata completeness
+
+```{r metadata-completeness}
+ggplot(
+  completeness,
+  aes(x = reorder(field, share), y = share)
+) +
+  geom_col(fill = "#265D84", width = 0.65) +
+  geom_text(
+    aes(label = percent(share, accuracy = 0.1)),
+    hjust = 1.15,
+    colour = "white",
+    fontface = "bold"
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = percent,
+    limits = c(0, 1),
+    expand = expansion(mult = c(0, 0))
+  ) +
+  labs(
+    title = "Every indexed release carries complete provenance metadata",
+    subtitle = paste(
+      comma(nrow(release_index)),
+      "unique release URLs and",
+      comma(n_distinct(release_index$release_id)),
+      "unique release identifiers"
+    ),
+    x = NULL,
+    y = "Complete records"
+  ) +
+  theme_pboc() +
+  theme(legend.position = "none")
+```
+
+### Text extraction
+
+`pboc_read_release()` retrieves article text, paragraph boundaries, and
+attachment links. The audit exercises the earliest and latest release in every
+configured feed, covering both current and legacy page structures.
+
+```{r text-extraction}
+ggplot(
+  text_audit,
+  aes(
+    x = feed,
+    y = text_characters,
+    colour = endpoint,
+    group = feed
+  )
+) +
+  geom_line(colour = "#C9CED3", linewidth = 0.7) +
+  geom_point(size = 3) +
+  coord_flip() +
+  scale_colour_manual(
+    values = c(Earliest = "#265D84", Latest = "#A61B29")
+  ) +
+  scale_y_log10(labels = comma) +
+  labs(
+    title = "Statement text retrieved across every feed's archive endpoints",
+    subtitle = paste(
+      sum(text_audit$status == "retrieved"),
+      "of",
+      nrow(text_audit),
+      "endpoint releases retrieved successfully"
+    ),
+    x = NULL,
+    y = "Text characters, logarithmic scale"
+  ) +
+  theme_pboc()
+```
+
+```{r text-audit-table}
+knitr::kable(
+  text_audit |>
+    arrange(feed, endpoint) |>
+    transmute(
+      Feed = feed,
+      Endpoint = endpoint,
+      Date = format(published_at, "%Y-%m-%d"),
+      Status = status,
+      `Text characters` = text_characters,
+      Paragraphs = paragraphs,
+      Attachments = attachments
+    ),
+  format.args = list(big.mark = ","),
+  align = c("l", "l", "l", "l", "r", "r", "r")
+)
+```
+
+## Every release
+
+The table contains every release in the snapshot. Search and column filters
+provide direct access to titles, dates, languages, feeds, identifiers, official
+release URLs, and the exact index page where each record was discovered.
+
+```{r complete-inventory, echo=FALSE}
+inventory <- release_index |>
+  arrange(desc(published_at), language, category, title) |>
+  transmute(
+    Date = format(published_at, "%Y-%m-%d"),
+    Language = language_label,
+    Feed = feed,
+    Title = title,
+    `Release ID` = release_id,
+    `Official release URL` = url,
+    `Official index page` = source_url
+  )
+
+DT::datatable(
+  inventory,
+  rownames = FALSE,
+  filter = "top",
+  options = list(
+    pageLength = 20,
+    lengthMenu = c(20, 50, 100),
+    scrollX = TRUE,
+    order = list(list(0, "desc"))
+  )
+)
+```
+
+## Rebuild the evidence
+
+Render the frozen snapshot:
+
+```r
+rmarkdown::render(
+  "inst/examples/pboc-release-coverage-dashboard.Rmd"
+)
+```
+
+Refresh every index page and both endpoints of every release feed, then render:
+
+```r
+rmarkdown::render(
+  "inst/examples/pboc-release-coverage-dashboard.Rmd",
+  params = list(
+    refresh_index = TRUE,
+    refresh_text_audit = TRUE
+  )
+)
+```
+
+The refresh path calls these public package functions:
+
+```r
+all_releases <- pboc_releases(
+  language = "both",
+  pages = "all"
+)
+
+one_statement <- pboc_read_release(all_releases[1, ])
+```
